@@ -151,7 +151,32 @@ run_feeds_and_config() {
     echo "CONFIG_TARGET_${DEVICE_TARGET}_${DEVICE_SUBTARGET}_DEVICE_${DEVICE_PROFILE}=y"
   } > .config
 
+  # Append user preinstall list (if exists)
+  local seed="$SCRIPT_DIR/config.seed"
+  if [[ -f "$seed" ]]; then
+    # Strip comments and blank lines, keep CONFIG_ directives only
+    local seed_count
+    seed_count=$(grep -cE '^(CONFIG_|# CONFIG_.* is not set$)' "$seed" || echo 0)
+    grep -E '^(CONFIG_|# CONFIG_.* is not set$)' "$seed" >> .config
+    ok "  appended $seed_count preinstall directives from config.seed"
+  else
+    warn "  no config.seed found — firmware will use ImmortalWrt defaults only"
+  fi
+
   make defconfig 2>&1 | tail -3
+
+  # Sanity-check: did our preinstall survive defconfig?
+  if [[ -f "$seed" ]]; then
+    local kept dropped
+    kept=$(grep -cE '^CONFIG_PACKAGE_[^=]+=y$' .config || echo 0)
+    dropped=$(grep -c '^CONFIG_PACKAGE_' "$seed" 2>/dev/null || echo 0)
+    dropped=$((dropped - kept))
+    if [[ $dropped -gt 0 ]]; then
+      warn "  NOTE: defconfig dropped ~$dropped preinstall entries"
+      warn "  (likely missing dependencies or renamed packages)"
+      warn "  Run './build.sh --menuconfig' to investigate."
+    fi
+  fi
   ok "  defconfig done → .config has $(wc -l < .config) lines."
   cd "$SCRIPT_DIR"
 }

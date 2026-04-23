@@ -50,15 +50,36 @@ HOST_TREE_DEPTH=100 ./build.sh
 CCACHE_SIZE=40G ./build.sh
 ```
 
+## 自定义预装（`config.seed`）
+
+仓库根有一份 `config.seed`，默认等效于 **Level 3 预装套件**：
+
+- **LuCI + 中文包 + Argon 主题** — Web UI 舒适可用
+- **AdGuardHome + luci-app** — DNS 级广告过滤
+- **OpenClash + luci-app** — VPN / 代理（Meta/Mihomo 内核首次启动后在 LuCI 里下载）
+- **USB 存储全家桶** — 接 U 盘直接做 NAS
+- **USB 4G/5G 网卡全协议** — RNDIS / CDC-Ether / NCM / MBIM / QMI，任何 USB 热点都能跑
+
+修改方法极简——打开 `config.seed`，像操作 `.config` 一样写：
+- `CONFIG_PACKAGE_xxx=y` 启用
+- 前面加 `#` 禁用某行
+- 删掉某行 = 交给 defconfig 默认处理
+
+改完 `./build.sh --clean && ./build.sh` 重编即可。
+
+**安全检查**：`build.sh` 在 `defconfig` 后会自动对比你声明的包有多少被保留、多少被 drop（通常是因为依赖缺失）。如果有 drop 会在日志里 warn，并提示你跑 `./build.sh --menuconfig` 诊断。
+
 ## 目录结构
 
 ```
 .
 ├── build.sh                 # 一键构建入口
+├── config.seed              # 预装包清单（Level 3，可自定义）
 ├── .github/workflows/
 │   └── build.yml            # GitHub Actions 云端编译（推 tag 触发）
 ├── docs/
-│   └── dependencies.md      # 各发行版依赖清单
+│   ├── dependencies.md      # 各发行版依赖清单
+│   └── troubleshooting.md   # 常见错误 + 修复
 ├── logs/                    # 构建日志（运行后生成，已 gitignore）
 └── openwrt/                 # 宿主树（运行后生成，已 gitignore）
 ```

@@ -1,0 +1,85 @@
+# config.seed — Level 3 preinstall list for GL-MT3600BE
+#
+# This file is *appended* to .config by build.sh after `make defconfig`.
+# Each line must be a standard kconfig declaration:
+#   CONFIG_PACKAGE_xxx=y      - include xxx as a built-in (baked into firmware)
+#   CONFIG_PACKAGE_xxx=m      - include xxx as a module (available via opkg)
+#   # CONFIG_PACKAGE_xxx is not set - explicitly exclude
+#
+# Lines starting with # (except '# CONFIG_...') are comments.
+#
+# To disable any item, either delete the line or change =y to =n and re-run
+# './build.sh --clean && ./build.sh'.
+#
+# Note: 5 baseline packages are already pulled in by the device profile
+# (mt7987-2p5g-phy-firmware, kmod-mt7990-firmware, kmod-hwmon-pwmfan,
+# kmod-usb3, automount), so we don't repeat them here.
+
+# ---------------------------------------------------------------
+# LuCI core + Chinese translations + Argon theme
+# ---------------------------------------------------------------
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-compat=y
+CONFIG_PACKAGE_luci-lib-ipkg=y
+CONFIG_PACKAGE_luci-lua-runtime=y
+CONFIG_PACKAGE_luci-theme-argon=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-package-manager-zh-cn=y
+
+# ---------------------------------------------------------------
+# Level 2 & 3: AdGuardHome DNS-level ad blocker
+# ---------------------------------------------------------------
+CONFIG_PACKAGE_adguardhome=y
+CONFIG_PACKAGE_luci-app-adguardhome=y
+CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y
+
+# ---------------------------------------------------------------
+# Level 3: OpenClash VPN / proxy
+# Runtime note: kernel binaries (Meta/Mihomo) are NOT bundled;
+# download them after first boot via LuCI → OpenClash → Upgrade.
+# ---------------------------------------------------------------
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y
+
+# ---------------------------------------------------------------
+# USB mass storage + filesystems (for sharing drives over network)
+# ---------------------------------------------------------------
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-usb-storage-uas=y
+CONFIG_PACKAGE_kmod-usb-xhci-mtk=y
+CONFIG_PACKAGE_block-mount=y
+CONFIG_PACKAGE_kmod-fs-ext4=y
+CONFIG_PACKAGE_kmod-fs-vfat=y
+CONFIG_PACKAGE_kmod-nls-cp437=y
+CONFIG_PACKAGE_kmod-nls-iso8859-1=y
+
+# ---------------------------------------------------------------
+# USB cellular tethering — lets any USB-tethered phone or 4G/5G
+# modem act as WAN. Covers all the major protocols.
+# ---------------------------------------------------------------
+CONFIG_PACKAGE_kmod-usb-net=y
+CONFIG_PACKAGE_kmod-usb-net-rndis=y
+CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
+CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y
+CONFIG_PACKAGE_kmod-usb-net-cdc-mbim=y
+CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y
+CONFIG_PACKAGE_kmod-usb-net-huawei-cdc-ncm=y
+CONFIG_PACKAGE_kmod-usb-wdm=y
+CONFIG_PACKAGE_kmod-usb-serial=y
+CONFIG_PACKAGE_kmod-usb-serial-option=y
+CONFIG_PACKAGE_kmod-usb-serial-wwan=y
+CONFIG_PACKAGE_umbim=y
+CONFIG_PACKAGE_uqmi=y
+CONFIG_PACKAGE_comgt=y
+CONFIG_PACKAGE_comgt-ncm=y
+CONFIG_PACKAGE_usb-modeswitch=y
+
+# ---------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------
+# nftables JSON output — useful for scripts that parse firewall rules
+CONFIG_PACKAGE_nftables-json=y
+# Keep opkg alongside ImmortalWrt's default apk for compatibility
+# with packages that still assume opkg metadata.
+CONFIG_PACKAGE_opkg=y
