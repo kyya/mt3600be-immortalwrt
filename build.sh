@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # build.sh — One-command build entry for GL-MT3600BE on ImmortalWrt mt798x-rebase.
 #
 # Pipeline: install-deps → clone host → apply patches → feeds → defconfig → compile

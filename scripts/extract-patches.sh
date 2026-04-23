@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # extract-mt3600be-patches.sh
 #
@@ -10,7 +11,7 @@
 #   ./extract-mt3600be-patches.sh --source-url https://github.com/ChuranNeko/openwrt-snapshot-gl-mt3600be.git \
 #                                 --output ./patches --with-soc
 #
-# Author: scaffolded by Claude for Yibo / crafted 2026
+# Author: scaffolded with AI assistance / crafted 2026
 
 set -euo pipefail
 

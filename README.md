@@ -114,8 +114,13 @@ git commit -am "sync: update patches from ChuranNeko@<commit>"
 
 ## License
 
-- `patches/` 内容派生自 ChuranNeko 的 fork，遵循其上游 OpenWrt 的 GPL-2.0 许可。
-- `build.sh` 和 `scripts/` 本仓库原创部分：MIT License。
+This project is licensed under **GPL-2.0-only**, matching the upstream OpenWrt / ImmortalWrt ecosystem. See the [`COPYING`](./COPYING) file for the full license text.
+
+- `patches/` contents are derived from [ChuranNeko/openwrt-snapshot-gl-mt3600be](https://github.com/ChuranNeko/openwrt-snapshot-gl-mt3600be) and retain their original GPL-2.0 license.
+- `build.sh`, `scripts/`, and all other original files in this repo are released under GPL-2.0-only.
+- Individual upstream patches under `patches/soc-support/` retain their original authors' copyright notices (MediaTek, Daniel Golle, et al.).
+
+SPDX short identifier: `GPL-2.0-only`
 
 ---
 
