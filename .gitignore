@@ -1,0 +1,23 @@
+# Build output / work tree
+/openwrt/
+/logs/
+*.log
+
+# Local extracted-patch staging (从脚本再生成时)
+/patches-new/
+/test-output/
+
+# ccache
+.ccache/
+
+# Editor files
+*.swp
+*.swo
+.vscode/
+.idea/
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*~

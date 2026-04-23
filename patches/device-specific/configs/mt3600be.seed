@@ -1,0 +1,12 @@
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_TARGET_mediatek_filogic_DEVICE_glinet_gl-mt3600be=y
+# CONFIG_PACKAGE_docker is not set
+# CONFIG_PACKAGE_dockerd is not set
+# CONFIG_PACKAGE_docker-compose is not set
+# CONFIG_PACKAGE_containerd is not set
+# CONFIG_PACKAGE_runc is not set
+# CONFIG_PACKAGE_tini is not set
+# CONFIG_DEFAULT_docker is not set
+# CONFIG_DEFAULT_dockerd is not set
+# CONFIG_DEFAULT_docker-compose is not set

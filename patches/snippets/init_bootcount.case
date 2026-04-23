@@ -1,0 +1,4 @@
+	glinet,gl-mt3600be)
+		ethtool --set-eee eth0 eee on
+		ethtool --set-eee eth0 eee off
+		;;

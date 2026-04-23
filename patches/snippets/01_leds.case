@@ -1,0 +1,4 @@
+glinet,gl-mt3600be)
+	ucidef_set_led_default "power" "POWER" "blue:run" "1"
+	ucidef_set_led_default "system" "SYSTEM" "white:system" "0"
+	;;

@@ -1,0 +1,98 @@
+. /lib/functions.sh
+
+case "$(board_name)" in
+	glinet,gl-mt3600be)
+		sed -i "s#^root:[^:]*:#root:\$6\$ClfQD9odfexwz389\$ScsAKvFOlDWEmFuvIexqmA4F3lPaIFAPYYoTXy/lvSqM2sI/KIcfObrkTmJtsXc4OyoBBi1VO/w5QKZQJ06nv0:#" /etc/shadow
+
+		suffix="$(tr -dc 'a-z0-9' </dev/urandom | dd bs=1 count=6 2>/dev/null)"
+		[ -n "$suffix" ] || suffix="guest01"
+
+		uci -q set wireless.default_radio0.disabled='0'
+		uci -q set wireless.default_radio1.disabled='0'
+		uci -q set wireless.default_radio0.ssid="OpenWrt-${suffix}"
+		uci -q set wireless.default_radio1.ssid="OpenWrt-${suffix}-5G"
+		uci -q set wireless.default_radio0.encryption='psk2'
+		uci -q set wireless.default_radio1.encryption='psk2'
+		uci -q set wireless.default_radio0.key='88888888'
+		uci -q set wireless.default_radio1.key='88888888'
+
+		uci -q set wireless.guest_radio0='wifi-iface'
+		uci -q set wireless.guest_radio0.device='radio0'
+		uci -q set wireless.guest_radio0.mode='ap'
+		uci -q set wireless.guest_radio0.network='guest'
+		uci -q set wireless.guest_radio0.ssid="OpenWrt-${suffix}-Guest"
+		uci -q set wireless.guest_radio0.encryption='psk2'
+		uci -q set wireless.guest_radio0.key='88888888'
+		uci -q set wireless.guest_radio0.disabled='1'
+
+		uci -q set wireless.guest_radio1='wifi-iface'
+		uci -q set wireless.guest_radio1.device='radio1'
+		uci -q set wireless.guest_radio1.mode='ap'
+		uci -q set wireless.guest_radio1.network='guest'
+		uci -q set wireless.guest_radio1.ssid="OpenWrt-${suffix}-Guest-5G"
+		uci -q set wireless.guest_radio1.encryption='psk2'
+		uci -q set wireless.guest_radio1.key='88888888'
+		uci -q set wireless.guest_radio1.disabled='1'
+		uci commit wireless
+
+		uci -q set network.guest_dev='device'
+		uci -q set network.guest_dev.type='bridge'
+		uci -q set network.guest_dev.name='br-guest'
+		uci -q set network.guest_dev.bridge_empty='1'
+		uci -q set network.guest='interface'
+		uci -q set network.guest.device='br-guest'
+		uci -q set network.guest.proto='static'
+		uci -q set network.guest.ipaddr='192.168.4.1'
+		uci -q set network.guest.netmask='255.255.255.0'
+
+		uci -q set network.wan2='interface'
+		uci -q set network.wan2.proto='dhcp'
+		uci -q set network.wan2.metric='30'
+		uci -q set network.wan2_6='interface'
+		uci -q set network.wan2_6.proto='none'
+		uci commit network
+
+		uci -q set dhcp.guest='dhcp'
+		uci -q set dhcp.guest.interface='guest'
+		uci -q set dhcp.guest.start='100'
+		uci -q set dhcp.guest.limit='150'
+		uci -q set dhcp.guest.leasetime='12h'
+		uci -q set dhcp.guest.ignore='1'
+		uci commit dhcp
+
+		uci -q set firewall.guest='zone'
+		uci -q set firewall.guest.name='guest'
+		uci -q set firewall.guest.input='REJECT'
+		uci -q set firewall.guest.output='ACCEPT'
+		uci -q set firewall.guest.forward='REJECT'
+		uci -q add_list firewall.guest.network='guest'
+
+		uci -q set firewall.guest_dns='rule'
+		uci -q set firewall.guest_dns.name='Allow-Guest-DNS'
+		uci -q set firewall.guest_dns.src='guest'
+		uci -q set firewall.guest_dns.dest_port='53'
+		uci -q set firewall.guest_dns.proto='tcp udp'
+		uci -q set firewall.guest_dns.target='ACCEPT'
+
+		uci -q set firewall.guest_dhcp='rule'
+		uci -q set firewall.guest_dhcp.name='Allow-Guest-DHCP'
+		uci -q set firewall.guest_dhcp.src='guest'
+		uci -q set firewall.guest_dhcp.dest_port='67-68'
+		uci -q set firewall.guest_dhcp.proto='udp'
+		uci -q set firewall.guest_dhcp.target='ACCEPT'
+
+		uci -q set firewall.guest_wan='forwarding'
+		uci -q set firewall.guest_wan.src='guest'
+		uci -q set firewall.guest_wan.dest='wan'
+
+		uci -q del_list firewall.@zone[1].network='wan2'
+		uci -q add_list firewall.@zone[1].network='wan2'
+		uci commit firewall
+
+		uci -q set openclash.config.core_type='Meta'
+		uci -q set openclash.config.enable='0'
+		uci commit openclash
+	;;
+esac
+
+exit 0

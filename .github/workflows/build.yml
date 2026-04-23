@@ -1,0 +1,78 @@
+name: Build MT3600BE Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: 'SSH debug via tmate on failure'
+        required: false
+        default: 'false'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Run build pipeline (deps + apply + compile)
+        id: build
+        env:
+          JOBS: 4
+        run: |
+          chmod +x ./build.sh
+          ./build.sh
+
+      - name: Setup tmate session (on failure, manual only)
+        if: failure() && github.event.inputs.debug_enabled == 'true'
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p artifacts
+          cp -v openwrt/bin/targets/mediatek/filogic/*mt3600be* artifacts/ 2>/dev/null || true
+          cp -v logs/*.log artifacts/ 2>/dev/null || true
+          ls -la artifacts/
+
+      - name: Upload firmware
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt3600be-firmware-${{ github.ref_name }}
+          path: artifacts/*mt3600be*
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.ref_name }}
+          path: artifacts/*.log
+
+      - name: Create GitHub Release
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*mt3600be*
+          generate_release_notes: true
