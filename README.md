@@ -25,13 +25,30 @@ openwrt/bin/targets/mediatek/filogic/*mt3600be*sysupgrade.bin
 ## 常用子命令
 
 ```bash
-./build.sh                 # 完整流水线
+./build.sh                 # 完整流水线（含 preflight 体检）
+./build.sh --preflight     # 只跑环境体检，不编译
 ./build.sh --deps-only     # 只装构建依赖
 ./build.sh --config        # 停在 feeds + defconfig 之后
 ./build.sh --menuconfig    # 合完 config 后开 menuconfig 自定义
 ./build.sh --resume        # 改完代码后继续编（跳过 clone）
-./build.sh --clean         # 清空 ./openwrt/ 从头来
+./build.sh --clean         # 清本仓库产物（openwrt/ 和 logs/）
+./build.sh --clean-all     # --clean + 清 ccache
+./build.sh --force         # 跳过 preflight 硬限（自担风险）
 ./build.sh --jobs 4        # 手动指定 -j 数量
+```
+
+## 环境体检（Preflight）
+
+首次 `./build.sh` 会先跑一次环境体检，检查：
+
+- **硬限**：CPU ≥ 2 核 / RAM ≥ 4 GB / 剩余磁盘 ≥ 25 GB / 必要命令存在 / 非 root 运行 / 文件系统大小写敏感
+- **软限（只警告）**：RAM < 8 GB 建议加 swap / 磁盘 < 40 GB 可能紧张 / 网络延迟
+
+不达硬限会直接退出。若明知故犯，加 `--force`。
+
+环境变量可覆盖默认阈值：
+```bash
+PREFLIGHT_MIN_RAM_GB=6 PREFLIGHT_MIN_DISK_GB=30 ./build.sh
 ```
 
 ## 可选的环境变量

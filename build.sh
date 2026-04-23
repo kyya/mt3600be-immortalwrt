@@ -7,16 +7,19 @@
 #            native MT3600BE support maintained by Tianling Shen.
 #
 # Pipeline:
-#   install-deps → clone → verify → feeds → config → make → output
+#   preflight → install-deps → clone → verify → feeds → config → make → output
 #
 # Usage:
 #   ./build.sh                 # full pipeline
+#   ./build.sh --preflight     # only run environment preflight check
 #   ./build.sh --deps-only     # just install build dependencies
 #   ./build.sh --config        # stop after feeds + defconfig
 #   ./build.sh --menuconfig    # after defconfig, open menuconfig
-#   ./build.sh --clean         # wipe ./openwrt/ and exit
+#   ./build.sh --clean         # remove ./openwrt/ + ./logs/ + make state
+#   ./build.sh --clean-all     # --clean + clear ccache too
 #   ./build.sh --resume        # skip clone, jump to make (after fixes)
 #   ./build.sh --jobs N        # override -j count (default: nproc)
+#   ./build.sh --force         # skip preflight hard limits (use at own risk)
 #   ./build.sh -h              # show this help
 
 set -euo pipefail
@@ -57,24 +60,208 @@ die()  { err "$@"; exit 1; }
 
 # ---------- args ----------
 MODE="full"
+FORCE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --preflight)   MODE="preflight"; shift ;;
     --deps-only)   MODE="deps"; shift ;;
     --config)      MODE="config"; shift ;;
     --menuconfig)  MODE="menuconfig"; shift ;;
     --clean)       MODE="clean"; shift ;;
+    --clean-all)   MODE="clean-all"; shift ;;
     --resume)      MODE="resume"; shift ;;
     --jobs)        JOBS="$2"; shift 2 ;;
-    -h|--help)     sed -n '3,22p' "$0"; exit 0 ;;
+    --force)       FORCE=1; shift ;;
+    -h|--help)     sed -n '3,25p' "$0"; exit 0 ;;
     *) die "Unknown arg: $1 (use -h for help)" ;;
   esac
 done
 
+# ---------- step: preflight check ----------
+# Hard requirements (fail-closed; --force to bypass):
+#   CPU cores    ≥ 2
+#   RAM          ≥ 4 GB
+#   Free disk    ≥ 25 GB at $SCRIPT_DIR (ImmortalWrt docs say 25G minimum)
+#   Commands     git make gcc g++ python3 perl
+#   Not root     (OpenWrt build refuses root unless FORCE_UNSAFE_CONFIGURE=1)
+#   FS           case-sensitive (OpenWrt build requires it)
+#
+# Soft advisories (warn only):
+#   RAM          < 8 GB → suggest adding swap
+#   Disk         < 40 GB → tight, could fail at final link
+#   Network      github.com unreachable via 443
+#
+# Env-override defaults:
+PREFLIGHT_MIN_CORES="${PREFLIGHT_MIN_CORES:-2}"
+PREFLIGHT_MIN_RAM_GB="${PREFLIGHT_MIN_RAM_GB:-4}"
+PREFLIGHT_MIN_DISK_GB="${PREFLIGHT_MIN_DISK_GB:-25}"
+PREFLIGHT_REC_RAM_GB="${PREFLIGHT_REC_RAM_GB:-8}"
+PREFLIGHT_REC_DISK_GB="${PREFLIGHT_REC_DISK_GB:-40}"
+
+preflight_check() {
+  log "Step 0/5: Preflight environment check..."
+  local failed=0 warned=0
+
+  # System / kernel / arch
+  local os_name arch kernel
+  if [[ -f /etc/os-release ]]; then
+    os_name=$(. /etc/os-release; echo "$PRETTY_NAME")
+  else
+    os_name="$(uname -s)"
+  fi
+  arch="$(uname -m)"
+  kernel="$(uname -r)"
+  printf "   %-14s %s  (%s, kernel %s)\n" "System:" "$os_name" "$arch" "$kernel"
+
+  # CPU
+  local cores cpu_model
+  cores=$(nproc 2>/dev/null || echo 0)
+  cpu_model=$(awk -F: '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null | sed 's/^ *//' || echo "unknown")
+  if [[ $cores -ge $PREFLIGHT_MIN_CORES ]]; then
+    printf "   %-14s %s cores — %s\n" "CPU:" "$cores" "$cpu_model"
+  else
+    printf "   %-14s %s cores  ✗ (min: %s)\n" "CPU:" "$cores" "$PREFLIGHT_MIN_CORES"
+    failed=$((failed+1))
+  fi
+
+  # RAM
+  local ram_kb ram_gb swap_kb swap_gb
+  ram_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  swap_kb=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  ram_gb=$((ram_kb / 1024 / 1024))
+  swap_gb=$((swap_kb / 1024 / 1024))
+  if [[ $ram_gb -lt $PREFLIGHT_MIN_RAM_GB ]]; then
+    printf "   %-14s %s GB  ✗ (min: %s GB)\n" "RAM:" "$ram_gb" "$PREFLIGHT_MIN_RAM_GB"
+    failed=$((failed+1))
+  elif [[ $ram_gb -lt $PREFLIGHT_REC_RAM_GB ]]; then
+    printf "   %-14s %s GB  ⚠  (< %s GB recommended; consider adding swap)\n" \
+      "RAM:" "$ram_gb" "$PREFLIGHT_REC_RAM_GB"
+    warned=$((warned+1))
+  else
+    printf "   %-14s %s GB  ✓\n" "RAM:" "$ram_gb"
+  fi
+  printf "   %-14s %s GB\n" "Swap:" "$swap_gb"
+
+  # Disk (free space at $SCRIPT_DIR)
+  local disk_avail_kb disk_avail_gb
+  disk_avail_kb=$(df -P "$SCRIPT_DIR" | awk 'NR==2{print $4}')
+  disk_avail_gb=$((disk_avail_kb / 1024 / 1024))
+  if [[ $disk_avail_gb -lt $PREFLIGHT_MIN_DISK_GB ]]; then
+    printf "   %-14s %s GB free at %s  ✗ (min: %s GB)\n" \
+      "Disk:" "$disk_avail_gb" "$SCRIPT_DIR" "$PREFLIGHT_MIN_DISK_GB"
+    failed=$((failed+1))
+  elif [[ $disk_avail_gb -lt $PREFLIGHT_REC_DISK_GB ]]; then
+    printf "   %-14s %s GB free  ⚠  (< %s GB recommended)\n" \
+      "Disk:" "$disk_avail_gb" "$PREFLIGHT_REC_DISK_GB"
+    warned=$((warned+1))
+  else
+    printf "   %-14s %s GB free  ✓\n" "Disk:" "$disk_avail_gb"
+  fi
+
+  # Required commands
+  local missing=()
+  for cmd in git make gcc g++ python3 perl awk find; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    printf "   %-14s all present  ✓\n" "Commands:"
+  else
+    printf "   %-14s missing: %s  ✗\n" "Commands:" "${missing[*]}"
+    warn "   → run './build.sh --deps-only' to install them"
+    failed=$((failed+1))
+  fi
+
+  # Non-root user check
+  if [[ $EUID -eq 0 ]]; then
+    printf "   %-14s root (UID 0)  ✗  OpenWrt build refuses root\n" "User:"
+    warn "   → create a non-root user, or export FORCE_UNSAFE_CONFIGURE=1"
+    failed=$((failed+1))
+  else
+    printf "   %-14s %s (UID %s)  ✓\n" "User:" "$(whoami)" "$EUID"
+  fi
+
+  # Filesystem case-sensitivity at SCRIPT_DIR
+  local probe="$SCRIPT_DIR/.preflight-case-probe"
+  if touch "${probe}_A" 2>/dev/null && touch "${probe}_a" 2>/dev/null; then
+    if [[ -f "${probe}_A" && -f "${probe}_a" ]] && \
+       [[ "$(ls "${probe}_A" 2>/dev/null)" != "$(ls "${probe}_a" 2>/dev/null)" ]]; then
+      printf "   %-14s case-sensitive  ✓\n" "Filesystem:"
+    else
+      printf "   %-14s NOT case-sensitive  ✗  OpenWrt build will fail\n" "Filesystem:"
+      failed=$((failed+1))
+    fi
+    rm -f "${probe}_A" "${probe}_a"
+  else
+    printf "   %-14s unknown (probe failed)  ⚠\n" "Filesystem:"
+    warned=$((warned+1))
+  fi
+
+  # Network reachability (soft)
+  if command -v curl >/dev/null 2>&1; then
+    local rtt
+    rtt=$(curl -sS -o /dev/null -w "%{time_total}" --max-time 5 \
+      https://github.com 2>/dev/null || echo "timeout")
+    if [[ "$rtt" == "timeout" ]]; then
+      printf "   %-14s github.com unreachable  ⚠\n" "Network:"
+      warned=$((warned+1))
+    else
+      printf "   %-14s github.com OK (%ss)\n" "Network:" "$rtt"
+    fi
+  else
+    printf "   %-14s curl not found — skipping\n" "Network:"
+  fi
+
+  echo
+  # Verdict
+  if [[ $failed -gt 0 ]]; then
+    err "Preflight FAILED: $failed hard requirement(s) not met, $warned warning(s)."
+    if [[ $FORCE -eq 1 ]]; then
+      warn "--force given, continuing anyway. You are on your own from here."
+    else
+      echo "  To override and proceed anyway: ./build.sh --force"
+      echo "  To fix dependencies:             ./build.sh --deps-only"
+      exit 1
+    fi
+  elif [[ $warned -gt 0 ]]; then
+    ok "Preflight: all hard requirements met ($warned advisory warning(s))."
+  else
+    ok "Preflight: all checks passed."
+  fi
+}
+
 # ---------- step: clean ----------
+# Two levels:
+#   do_clean       — remove ./openwrt/ and ./logs/ (repo-local artifacts)
+#   do_clean_all   — above + ~/.ccache (ccache is shared across projects,
+#                    but we ARE the one who set it up via `ccache -M 20G`)
 do_clean() {
-  log "CLEAN: removing $WORK_DIR ..."
-  rm -rf "$WORK_DIR"
-  ok "cleaned (logs kept)."
+  log "CLEAN: removing repo-local build artifacts..."
+  if [[ -d "$WORK_DIR" ]]; then
+    local sz; sz=$(du -sh "$WORK_DIR" 2>/dev/null | awk '{print $1}')
+    rm -rf "$WORK_DIR"
+    ok "  removed $WORK_DIR ($sz)"
+  else
+    ok "  $WORK_DIR doesn't exist — nothing to do"
+  fi
+  if [[ -d "$LOG_DIR" ]]; then
+    local sz; sz=$(du -sh "$LOG_DIR" 2>/dev/null | awk '{print $1}')
+    rm -rf "$LOG_DIR"
+    ok "  removed $LOG_DIR ($sz)"
+  fi
+  ok "clean done (apt packages and ccache NOT touched)."
+}
+
+do_clean_all() {
+  do_clean
+  log "CLEAN-ALL: also clearing ccache..."
+  if command -v ccache >/dev/null 2>&1; then
+    local sz; sz=$(ccache -s 2>/dev/null | awk '/Cache size/{print $3, $4; exit}')
+    ccache -C >/dev/null 2>&1 || true
+    ok "  ccache cleared (was $sz)"
+  else
+    ok "  ccache not installed — nothing to clear"
+  fi
+  ok "clean-all done."
 }
 
 # ---------- step: install deps ----------
@@ -181,6 +368,63 @@ run_feeds_and_config() {
   cd "$SCRIPT_DIR"
 }
 
+# ---------- monitor helper: print periodic progress for a long-running phase ----------
+# $1 = label (e.g. "download")
+# $2 = directory to measure
+# $3 = stamp file (created when main process finishes) — monitor stops when it appears
+# $4 = interval in seconds (default 5)
+start_monitor() {
+  local label="$1" watch_dir="$2" done_stamp="$3" interval="${4:-5}"
+  (
+    local prev_files=0 prev_bytes=0 iter=0
+    local start_ts=$(date +%s)
+    while [[ ! -f "$done_stamp" ]]; do
+      local files=0 bytes=0
+      if [[ -d "$watch_dir" ]]; then
+        files=$(find "$watch_dir" -maxdepth 2 -type f 2>/dev/null | wc -l)
+        bytes=$(du -sb "$watch_dir" 2>/dev/null | awk '{print $1}')
+        bytes=${bytes:-0}
+      fi
+      local d_files=$((files - prev_files))
+      local d_bytes=$((bytes - prev_bytes))
+      local elapsed=$(( $(date +%s) - start_ts ))
+
+      # Human-readable sizes
+      local hr_total hr_delta
+      hr_total=$(numfmt --to=iec --suffix=B "$bytes" 2>/dev/null || echo "${bytes}B")
+      if [[ $d_bytes -ge 0 ]]; then
+        hr_delta=$(numfmt --to=iec --suffix=B "$d_bytes" 2>/dev/null || echo "${d_bytes}B")
+        hr_delta="+$hr_delta"
+      else
+        hr_delta="$(numfmt --to=iec --suffix=B $((-d_bytes)) 2>/dev/null)"
+        hr_delta="-$hr_delta"
+      fi
+
+      # Skip first iteration (delta meaningless)
+      if [[ $iter -gt 0 ]]; then
+        printf "%s[%s]%s  📊 %-9s %3d files / %-8s  (Δ +%d files, %s in %ds)  elapsed %dm%02ds\n" \
+          "$C_B" "$(date +%H:%M:%S)" "$C_RST" \
+          "$label" "$files" "$hr_total" "$d_files" "$hr_delta" "$interval" \
+          $((elapsed / 60)) $((elapsed % 60))
+      fi
+
+      prev_files=$files
+      prev_bytes=$bytes
+      iter=$((iter+1))
+      sleep "$interval"
+    done
+  ) &
+  echo $!  # return monitor PID
+}
+
+stop_monitor() {
+  local pid="$1"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+}
+
 # ---------- step: compile ----------
 do_compile() {
   log "Step 5/5: Compiling with -j$JOBS ..."
@@ -189,18 +433,69 @@ do_compile() {
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   local dl_log="$LOG_DIR/download-$ts.log"
   local build_log="$LOG_DIR/build-$ts.log"
+  local dl_done_stamp="$LOG_DIR/.dl-done-$ts"
+  local build_done_stamp="$LOG_DIR/.build-done-$ts"
 
-  log "  5.1: pre-downloading source packages → $dl_log"
+  # ----- 5.1: download with live monitor -----
+  log "  5.1: downloading source packages"
+  log "       live log → $dl_log"
+  log "       monitor  → every 5s, watching openwrt/dl/"
+  echo
+
+  # Remove stale stamp if re-running
+  rm -f "$dl_done_stamp"
+
+  # Start background monitor
+  local dl_mon_pid
+  dl_mon_pid=$(start_monitor "download" "$WORK_DIR/dl" "$dl_done_stamp" 5)
+
+  # Make sure we clean up the monitor if user Ctrl+C's
+  trap "stop_monitor $dl_mon_pid; exit 130" INT TERM
+
+  # The actual download
+  local dl_rc=0
   if ! make download -j"$JOBS" > "$dl_log" 2>&1; then
-    err "download phase failed — see $dl_log"
+    dl_rc=$?
+  fi
+  touch "$dl_done_stamp"
+  stop_monitor "$dl_mon_pid"
+  trap - INT TERM
+  echo
+
+  if [[ $dl_rc -ne 0 ]]; then
+    err "download phase failed (rc=$dl_rc) — last 20 lines of $dl_log:"
     tail -20 "$dl_log" >&2
     exit 1
   fi
-  ok "  downloads complete."
 
-  log "  5.2: compiling → $build_log"
+  local final_files final_size
+  final_files=$(find "$WORK_DIR/dl" -maxdepth 2 -type f 2>/dev/null | wc -l)
+  final_size=$(du -sh "$WORK_DIR/dl" 2>/dev/null | awk '{print $1}')
+  ok "  download done: $final_files files, $final_size total."
+
+  # ----- 5.2: compile with live monitor -----
+  log "  5.2: compiling"
+  log "       live log → $build_log"
+  log "       monitor  → every 10s, watching openwrt/staging_dir/ and build_dir/"
+  echo
+
+  rm -f "$build_done_stamp"
+  local build_mon_pid
+  build_mon_pid=$(start_monitor "compile " "$WORK_DIR/staging_dir" "$build_done_stamp" 10)
+
+  trap "stop_monitor $build_mon_pid; exit 130" INT TERM
+
+  local build_rc=0
   if ! make -j"$JOBS" > "$build_log" 2>&1; then
-    err "Build FAILED. Re-running single-threaded verbose for diagnostics:"
+    build_rc=$?
+  fi
+  touch "$build_done_stamp"
+  stop_monitor "$build_mon_pid"
+  trap - INT TERM
+  echo
+
+  if [[ $build_rc -ne 0 ]]; then
+    err "Build FAILED (rc=$build_rc). Re-running single-threaded verbose for diagnostics:"
     local verbose_log="$LOG_DIR/verbose-$ts.log"
     warn "  verbose log: $verbose_log"
     make -j1 V=s > "$verbose_log" 2>&1 || true
@@ -238,9 +533,12 @@ do_compile() {
 log "=== MT3600BE Build Pipeline (mode=$MODE, jobs=$JOBS) ==="
 
 case "$MODE" in
+  preflight)   preflight_check ;;
   clean)       do_clean ;;
+  clean-all)   do_clean_all ;;
   deps)        install_deps ;;
   config)
+    preflight_check
     install_deps
     clone_host
     verify_device_support
@@ -248,6 +546,7 @@ case "$MODE" in
     ok "DONE (config mode). Run './build.sh --resume' to compile."
     ;;
   menuconfig)
+    preflight_check
     install_deps
     clone_host
     verify_device_support
@@ -261,6 +560,7 @@ case "$MODE" in
     do_compile
     ;;
   full)
+    preflight_check
     install_deps
     clone_host
     verify_device_support
